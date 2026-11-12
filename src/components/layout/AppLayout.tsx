@@ -1,5 +1,6 @@
 import {
   ActionIcon,
+  Alert,
   AppShell,
   Burger,
   Container,
@@ -17,6 +18,7 @@ import {
 } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
 import {
+  IconAlertTriangle,
   IconLayoutDashboard,
   IconMoon,
   IconLogout,
@@ -28,7 +30,10 @@ import {
 import { useEffect, useRef } from 'react'
 import { Link, NavLink as RouterLink, Outlet, useLocation, useMatches, useNavigation } from 'react-router'
 import companySymbol from '../../assets/company-symbol.png'
-import { signOut, useAuth } from '../../services/auth'
+import { useCredential } from '../../hooks/useCredential'
+import { useAuth } from '../../services/auth'
+import { logout } from '../../services/session'
+import { CredentialMenu } from './CredentialMenu'
 import { LAYOUT_BREAKPOINTS, useIsMobile, useIsTablet } from '../../hooks/useBreakpoints'
 
 export interface RouteHandle {
@@ -78,7 +83,7 @@ function UserMenu() {
       </Menu.Target>
       <Menu.Dropdown>
         <Menu.Label>Signed in as {username}</Menu.Label>
-        <Menu.Item leftSection={<IconLogout size={16} />} onClick={() => signOut()}>
+        <Menu.Item leftSection={<IconLogout size={16} />} onClick={() => void logout()}>
           Sign out
         </Menu.Item>
       </Menu.Dropdown>
@@ -108,6 +113,8 @@ export function AppLayout() {
   const railExpanded = isRail && opened
   const collapsed = isRail && !opened
   const { pathname } = useLocation()
+  const { credential, reload: reloadCredential } = useCredential()
+  const remarks = credential?.remarks?.trim()
   const mainRef = useRef<HTMLElement>(null)
   const handle = useMatches()
     .map((m) => m.handle as RouteHandle | undefined)
@@ -169,6 +176,7 @@ export function AppLayout() {
           </Group>
           <Group gap="xs" wrap="nowrap" px="md">
             <ColorSchemeToggle />
+            <CredentialMenu credential={credential} onSaved={reloadCredential} />
             <UserMenu />
           </Group>
         </Group>
@@ -200,6 +208,17 @@ export function AppLayout() {
       {railExpanded && <Overlay fixed backgroundOpacity={0.3} zIndex={getDefaultZIndex('app') - 1} onClick={close} />}
 
       <AppShell.Main ref={mainRef}>
+        {remarks && (
+          <Alert
+            color="red"
+            variant="filled"
+            radius={0}
+            icon={<IconAlertTriangle size={18} />}
+            className="sticky top-0 z-10"
+          >
+            {remarks}
+          </Alert>
+        )}
         <Container size="xl" px={{ base: 'md', sm: 'lg', lg: 'xl' }} py={{ base: 'lg', sm: 'xl' }}>
           <Outlet />
         </Container>

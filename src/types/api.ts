@@ -1,5 +1,11 @@
 /** Types mirror the Automation API (Automation.dll DTOs and models, JSON camelCase). */
 
+export interface LoginResponse {
+  token: string | null
+  expiresAt?: string
+  username: string | null
+}
+
 export interface Vehicle {
   id: number
   vehicleNo: string | null
@@ -27,9 +33,9 @@ export interface VehicleStatusView {
   mainPower: string | null
   ignition: string | null
   speed: number | null
-  isActive: boolean | null
+  isSurakshaMitrActive: boolean | null
+  isApmConnectActive: boolean | null
   alerts: string | null
-  createdAt: string
   updatedAt: string | null
 }
 
@@ -41,10 +47,14 @@ export interface CursorPage<T> {
   nextAfterId: number | null
 }
 
-/** Status pages also carry the active/inactive totals for the current search. */
 export interface StatusCursorPage extends CursorPage<VehicleStatusView> {
-  activeCount: number
-  inactiveCount: number
+  /** Fleet-wide per-product totals returned with every status page. */
+  surakshaMitrActiveCount: number
+  apmConnectActiveCount: number
+  surakshaMitrInactiveCount: number
+  apmConnectInactiveCount: number
+  /** Vehicles inactive in both Suraksha Mitr and APM Connect. */
+  inactiveInBothCount: number
   /** Next `skip` when paging a statusDateTime sort; null for the id sort. */
   nextSkip: number | null
 }
@@ -58,8 +68,23 @@ export interface ListQuery {
 export type StatusSort = 'id_asc' | 'statusDateTime_asc' | 'statusDateTime_desc'
 
 export interface StatusListQuery extends ListQuery {
-  isActive?: boolean
+  /** Filter on the Suraksha Mitr / APM Connect active flags (combined with AND). */
+  isSurakshaMitrActive?: boolean
+  isApmConnectActive?: boolean
   /** Default is id_asc (page with afterId). The statusDateTime sorts are paged with skip instead. */
   sort?: StatusSort
   skip?: number
+}
+
+/** The Suraksha Mitr portal login the automation uses. */
+export interface SurakshaMitrCredential {
+  username: string | null
+  password: string | null
+  remarks: string | null
+  updatedAt: string | null
+}
+
+export interface UpdateSurakshaMitrCredentialRequest {
+  username: string
+  password: string
 }

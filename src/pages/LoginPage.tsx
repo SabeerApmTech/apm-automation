@@ -2,9 +2,9 @@ import { Alert, Button, Card, PasswordInput, Stack, Text, TextInput } from '@man
 import { IconAlertTriangle } from '@tabler/icons-react'
 import { useState, type FormEvent } from 'react'
 import companySymbol from '../assets/company-symbol.png'
-import { basicHeader, signIn, useAuth } from '../services/auth'
+import { useAuth } from '../services/auth'
 import { ApiError } from '../services/http'
-import { getVehicles } from '../services/vehicles'
+import { login } from '../services/session'
 
 export default function LoginPage() {
   const { notice } = useAuth()
@@ -21,14 +21,11 @@ export default function LoginPage() {
     }
     setSubmitting(true)
     setError(null)
-    const header = basicHeader(username.trim(), password)
     try {
-      // The API has no login endpoint, so a cheap authenticated request verifies the credentials.
-      await getVehicles({ take: 1 }, undefined, header)
-      signIn(username.trim(), header)
+      await login(username.trim(), password)
     } catch (e) {
       setError(
-        e instanceof ApiError && e.status === 401
+        e instanceof ApiError && (e.status === 401 || e.status === 400)
           ? 'Incorrect username or password.'
           : e instanceof ApiError
             ? e.message

@@ -1,30 +1,32 @@
 import { Alert, Button, Loader, Modal, Stack, Text } from '@mantine/core'
-import { IconAlertTriangle, IconDeviceDesktopDown } from '@tabler/icons-react'
+import { IconAlertTriangle } from '@tabler/icons-react'
 import { useMemo, useState } from 'react'
 import { ActivityBadge, StateBadge } from '../common/Badges'
 import { DataTable, type DataTableColumn } from '../common/DataTable'
 import { DetailGrid } from '../common/DetailGrid'
-import { useAppDownload } from '../../hooks/useAppDownload'
 import { useFleet, type FleetRow } from '../../hooks/useFleet'
 import { useUrlFilters } from '../../hooks/useUrlFilters'
+import { activityOf as statusActivity, type Activity } from '../../lib/activity'
 import { PAGE_SIZE } from '../../lib/config'
 import { exportTable } from '../../lib/export'
 import { formatDateTime, formatNumber, formatSpeed, text } from '../../lib/format'
 import { notify } from '../../utils/notify'
 
-type Activity = 'active' | 'inactive' | 'unknown'
-
-const ACTIVITY_OPTIONS = [
+const FLAG_OPTIONS = [
   { value: '', label: 'All' },
   { value: 'active', label: 'Active' },
   { value: 'inactive', label: 'Inactive' },
-  { value: 'unknown', label: 'Not fetched' },
 ]
 
-/** A vehicle with no status record, or a record without an active flag, counts as unknown. */
+/** Whether a vehicle's status flag satisfies a filter; vehicles with no status never match one. */
+function flagMatches(flag: boolean | null | undefined, filter: string) {
+  if (!filter) return true
+  return filter === 'active' ? flag === true : flag === false
+}
+
+/** Active if either product is active, inactive if both are; no record or missing flags is unknown. */
 function activityOf(row: FleetRow): Activity {
-  const flag = row.status?.isActive
-  return flag === true ? 'active' : flag === false ? 'inactive' : 'unknown'
+  return statusActivity(row.status)
 }
 
 function matches(row: FleetRow, query: string) {
@@ -47,6 +49,8 @@ const EXPORT_HEADERS = [
   'Franchisee',
   'Portal status',
   'Status',
+  'Suraksha Mitr',
+  'APM Connect',
   'Status date/time',
   'Main power',
   'Ignition',
@@ -55,6 +59,8 @@ const EXPORT_HEADERS = [
 ]
 
 const ACTIVITY_LABEL: Record<Activity, string> = { active: 'Active', inactive: 'Inactive', unknown: 'Not fetched' }
+
+const flagLabel = (flag: boolean | null | undefined) => (flag === true ? 'Active' : flag === false ? 'Inactive' : '')
 
 function toExportRow({ vehicle: v, status: s }: FleetRow): string[] {
   const cell = (value: string | number | null | undefined) => (value === null || value === undefined ? '' : String(value))
@@ -73,6 +79,8 @@ function toExportRow({ vehicle: v, status: s }: FleetRow): string[] {
     cell(v.franchisee),
     cell(v.status),
     ACTIVITY_LABEL[activityOf({ vehicle: v, status: s })],
+    flagLabel(s?.isSurakshaMitrActive),
+    flagLabel(s?.isApmConnectActive),
     cell(s?.statusDateTime),
     cell(s?.mainPower),
     cell(s?.ignition),
@@ -82,26 +90,43 @@ function toExportRow({ vehicle: v, status: s }: FleetRow): string[] {
 }
 
 export function FleetTable() {
-  const filters = useUrlFilters(['activity'])
+  const filters = useUrlFilters(['surakshaMitr', 'apmConnect'])
   const fleet = useFleet()
-  const appDownload = useAppDownload()
   const [selected, setSelected] = useState<FleetRow | null>(null)
   const [exporting, setExporting] = useState(false)
   const [shown, setShown] = useState({ key: '', count: PAGE_SIZE })
 
-  const rawActivity = filters.extras.activity ?? ''
-  const activity = ACTIVITY_OPTIONS.some((o) => o.value === rawActivity) ? rawActivity : ''
+  const flagParam = (key: 'surakshaMitr' | 'apmConnect') => {
+    const raw = filters.extras[key] ?? ''
+    return FLAG_OPTIONS.some((o) => o.value === raw) ? raw : ''
+  }
+  const surakshaMitr = flagParam('surakshaMitr')
+  const apmConnect = flagParam('apmConnect')
   const query = filters.search.toLowerCase()
 
   const filtered = useMemo(
-    () => fleet.rows.filter((row) => (!activity || activityOf(row) === activity) && (!query || matches(row, query))),
-    [fleet.rows, activity, query],
+    () =>
+      fleet.rows.filter(
+        (row) =>
+          flagMatches(row.status?.isSurakshaMitrActive, surakshaMitr) &&
+          flagMatches(row.status?.isApmConnectActive, apmConnect) &&
+          (!query || matches(row, query)),
+      ),
+    [fleet.rows, surakshaMitr, apmConnect, query],
   )
 
   // Show a page at a time; the window resets whenever the filters change.
-  const windowKey = `${query}|${activity}`
+  const windowKey = `${query}|${surakshaMitr}|${apmConnect}`
   const count = shown.key === windowKey ? shown.count : PAGE_SIZE
   const visible = filtered.slice(0, count)
+
+  const notFetched = fleet.statusesLoading ? (
+    <Loader size={14} />
+  ) : (
+    <Text size="sm" c="dimmed">
+      Not fetched
+    </Text>
+  )
 
   const columns: DataTableColumn<FleetRow>[] = [
     {
@@ -114,18 +139,14 @@ export function FleetTable() {
       ),
     },
     {
-      key: 'activity',
-      header: 'Status',
-      render: (row) =>
-        row.status ? (
-          <ActivityBadge active={row.status.isActive} />
-        ) : fleet.statusesLoading ? (
-          <Loader size={14} />
-        ) : (
-          <Text size="sm" c="dimmed">
-            Not fetched
-          </Text>
-        ),
+      key: 'surakshaMitr',
+      header: 'Suraksha Mitr',
+      render: (row) => (row.status ? <ActivityBadge active={row.status.isSurakshaMitrActive} /> : notFetched),
+    },
+    {
+      key: 'apmConnect',
+      header: 'APM Connect',
+      render: (row) => (row.status ? <ActivityBadge active={row.status.isApmConnectActive} /> : notFetched),
     },
     { key: 'imei', header: 'IMEI', render: ({ vehicle }) => <Text size="sm" ff="monospace">{text(vehicle.imei)}</Text> },
     { key: 'owner', header: 'Owner', render: ({ vehicle }) => text(vehicle.owner) },
@@ -191,18 +212,14 @@ export function FleetTable() {
         errorTitle="Couldn't load vehicles"
         search={{ value: filters.input, onChange: filters.setInput, placeholder: 'Search vehicle no, IMEI, owner…' }}
         filters={{
-          fields: [{ key: 'activity', label: 'Status', type: 'segmented', data: ACTIVITY_OPTIONS }],
-          values: { activity },
+          fields: [
+            { key: 'surakshaMitr', label: 'Suraksha Mitr', type: 'segmented', data: FLAG_OPTIONS },
+            { key: 'apmConnect', label: 'APM Connect', type: 'segmented', data: FLAG_OPTIONS },
+          ],
+          values: { surakshaMitr, apmConnect },
           onChange: (key, value) => filters.setParam(key, value || null),
           onReset: filters.reset,
-          activeCount: activity ? 1 : 0,
-        }}
-        primaryAction={{
-          label: 'Download app',
-          icon: <IconDeviceDesktopDown size={16} />,
-          onClick: () => void appDownload.start(),
-          // Progress is shown in the notification, so the button just locks meanwhile.
-          disabled: appDownload.downloading,
+          activeCount: (surakshaMitr ? 1 : 0) + (apmConnect ? 1 : 0),
         }}
         exporter={{ onExport, busy: exporting, disabledReason: exportBlocked }}
         onRefresh={fleet.reload}
@@ -265,12 +282,13 @@ function VehicleDetails({ row: { vehicle: v, status: s } }: { row: FleetRow }) {
         items={[
           ['Vehicle number', text(v.vehicleNo)],
           ['IMEI', text(v.imei)],
-          ['Status', s ? <ActivityBadge key="a" active={s.isActive} /> : 'Not fetched yet'],
+          ['Suraksha Mitr', s ? <ActivityBadge key="sm" active={s.isSurakshaMitrActive} /> : 'Not fetched yet'],
+          ['APM Connect', s ? <ActivityBadge key="ac" active={s.isApmConnectActive} /> : 'Not fetched yet'],
           ['Status date/time', formatDateTime(s?.statusDateTime)],
           ['Speed', formatSpeed(s?.speed)],
           ['Main power', <StateBadge key="p" value={s?.mainPower ?? null} />],
           ['Ignition', <StateBadge key="i" value={s?.ignition ?? null} neutralOff />],
-          ['Fetched', formatDateTime(s ? (s.updatedAt ?? s.createdAt) : null)],
+          ['Fetched', formatDateTime(s?.updatedAt)],
           ['Chassis number', text(v.chassisNo)],
           ['Portal status', <StateBadge key="ps" value={v.status} />],
           ['Owner', text(v.owner)],

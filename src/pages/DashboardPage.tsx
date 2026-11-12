@@ -18,7 +18,7 @@ const RECENT_COUNT = 8
 
 const ACTIONS: { label: string; description: string; to: string; icon: ReactNode; color: MantineColor }[] = [
   { label: 'Vehicles', description: 'Browse and search all vehicles', to: '/vehicles', icon: <IconTruck size={20} />, color: 'brand' },
-  { label: 'Inactive vehicles', description: 'Devices reporting as inactive', to: '/vehicles?activity=inactive', icon: <IconPlugConnectedX size={20} />, color: 'red' },
+  { label: 'Inactive vehicles', description: 'Devices reporting as inactive', to: '/vehicles?surakshaMitr=inactive&apmConnect=inactive', icon: <IconPlugConnectedX size={20} />, color: 'red' },
 ]
 
 type ExportKind = 'active' | 'inactive' | 'unfetched'
@@ -35,17 +35,24 @@ async function loadUnfetchedImeis() {
   return vehicles.filter((v) => !fetched.has(v.id)).map((v) => v.imei)
 }
 
+/**
+ * IMEIs of active vehicles (either product active) or inactive ones (both inactive). The API
+ * filters combine with AND, so "either active" is the union of the two single-flag lists.
+ */
+async function loadStatusImeis(kind: 'active' | 'inactive') {
+  const pages = (filter: { isSurakshaMitrActive?: boolean; isApmConnectActive?: boolean }) =>
+    fetchEveryPage((afterId, signal) => getVehicleStatuses({ afterId, take: FETCH_SIZE, ...filter }, signal))
+  const lists =
+    kind === 'active'
+      ? await Promise.all([pages({ isSurakshaMitrActive: true }), pages({ isApmConnectActive: true })])
+      : [await pages({ isSurakshaMitrActive: false, isApmConnectActive: false })]
+  return lists.flat().map((r) => r.imei)
+}
+
 /** Downloads just the IMEIs for one group of vehicles as an Excel file. */
 async function exportImeis(kind: ExportKind) {
   const label = EXPORT_LABEL[kind]
-  const raw =
-    kind === 'unfetched'
-      ? await loadUnfetchedImeis()
-      : (
-          await fetchEveryPage((afterId, signal) =>
-            getVehicleStatuses({ afterId, take: FETCH_SIZE, isActive: kind === 'active' }, signal),
-          )
-        ).map((r) => r.imei)
+  const raw = kind === 'unfetched' ? await loadUnfetchedImeis() : await loadStatusImeis(kind)
   const imeis = [...new Set(raw.map((imei) => imei?.trim()).filter((imei): imei is string => Boolean(imei)))]
   if (imeis.length === 0) return notify.info(`There are no ${label} IMEIs to export.`, 'Nothing to export')
   await exportTable('xlsx', `${label}-imeis`, ['IMEI'], imeis.map((imei) => [imei]))
@@ -68,7 +75,10 @@ export default function DashboardPage() {
   const totals = useStatusSummary()
   // The API can sort by status time, so the latest reports are a single small request.
   const inactive = useCursorList('inactive', (_afterId, signal) =>
-    getVehicleStatuses({ take: RECENT_COUNT, isActive: false, sort: 'statusDateTime_desc' }, signal),
+    getVehicleStatuses(
+      { take: RECENT_COUNT, isSurakshaMitrActive: false, isApmConnectActive: false, sort: 'statusDateTime_desc' },
+      signal,
+    ),
   )
   const recentInactive = inactive.items
 
@@ -124,6 +134,7 @@ export default function DashboardPage() {
         />
         <StatCard
           label="Active"
+          hint={summary ? `Suraksha Mitr ${formatNumber(summary.surakshaMitrActive)} · APM Connect ${formatNumber(summary.apmConnectActive)}` : undefined}
           value={formatNumber(summary?.active)}
           icon={<IconPlugConnected size={22} />}
           color="teal"
@@ -138,6 +149,7 @@ export default function DashboardPage() {
         />
         <StatCard
           label="Inactive"
+          hint={summary ? `Suraksha Mitr ${formatNumber(summary.surakshaMitrInactive)} · APM Connect ${formatNumber(summary.apmConnectInactive)}` : undefined}
           value={formatNumber(summary?.inactive)}
           icon={<IconPlugConnectedX size={22} />}
           color="red"
@@ -157,7 +169,7 @@ export default function DashboardPage() {
           title="Inactive vehicles"
           description="Most recent inactive status records"
           action={
-            <Anchor component={Link} to="/vehicles?activity=inactive" size="sm" fw={500}>
+            <Anchor component={Link} to="/vehicles?surakshaMitr=inactive&apmConnect=inactive" size="sm" fw={500}>
               View all
             </Anchor>
           }
@@ -173,12 +185,13 @@ export default function DashboardPage() {
               {inactive.error ? 'Inactive vehicles could not be loaded.' : 'No inactive vehicles found.'}
             </Text>
           ) : (
-            <Table.ScrollContainer minWidth={360}>
+            <Table.ScrollContainer minWidth={420}>
               <Table verticalSpacing="xs" highlightOnHover>
                 <Table.Thead>
                   <Table.Tr>
                     <Table.Th>IMEI</Table.Th>
-                    <Table.Th>Status</Table.Th>
+                    <Table.Th>Suraksha Mitr</Table.Th>
+                    <Table.Th>APM Connect</Table.Th>
                     <Table.Th>Status time</Table.Th>
                   </Table.Tr>
                 </Table.Thead>
@@ -191,7 +204,10 @@ export default function DashboardPage() {
                         </Text>
                       </Table.Td>
                       <Table.Td>
-                        <ActivityBadge active={s.isActive} />
+                        <ActivityBadge active={s.isSurakshaMitrActive} />
+                      </Table.Td>
+                      <Table.Td>
+                        <ActivityBadge active={s.isApmConnectActive} />
                       </Table.Td>
                       <Table.Td className="whitespace-nowrap">{formatDateTime(s.statusDateTime)}</Table.Td>
                     </Table.Tr>

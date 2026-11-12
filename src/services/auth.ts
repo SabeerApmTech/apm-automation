@@ -1,16 +1,24 @@
 import { useSyncExternalStore } from 'react'
 
 /**
- * HTTP Basic credentials for the API. They live only in this tab's sessionStorage
- * (cleared when the tab closes) and are never bundled or logged.
+ * The API's JWT bearer token. It lives only in this tab's sessionStorage
+ * (cleared when the tab closes) and is never bundled or logged.
  */
 const STORAGE_KEY = 'automation.session'
 
 interface AuthState {
   token: string | null
   username: string | null
+  /** ISO timestamp after which the token is no longer accepted. */
+  expiresAt: string | null
   /** Why the user was signed out, shown on the sign-in screen. */
   notice: string | null
+}
+
+function isExpired(expiresAt: string | null) {
+  if (!expiresAt) return false
+  const time = Date.parse(expiresAt)
+  return Number.isFinite(time) && time <= Date.now()
 }
 
 function load(): AuthState {
@@ -19,13 +27,14 @@ function load(): AuthState {
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<AuthState>
       if (typeof parsed.token === 'string' && typeof parsed.username === 'string') {
-        return { token: parsed.token, username: parsed.username, notice: null }
+        const expiresAt = typeof parsed.expiresAt === 'string' ? parsed.expiresAt : null
+        if (!isExpired(expiresAt)) return { token: parsed.token, username: parsed.username, expiresAt, notice: null }
       }
     }
   } catch {
     // Storage unavailable or corrupt: start signed out.
   }
-  return { token: null, username: null, notice: null }
+  return { token: null, username: null, expiresAt: null, notice: null }
 }
 
 let state = load()
@@ -34,7 +43,7 @@ const listeners = new Set<() => void>()
 function set(next: AuthState) {
   state = next
   try {
-    if (next.token) sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ token: next.token, username: next.username }))
+    if (next.token) sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ token: next.token, username: next.username, expiresAt: next.expiresAt }))
     else sessionStorage.removeItem(STORAGE_KEY)
   } catch {
     // Non-fatal: the session just won't survive a refresh.
@@ -42,23 +51,21 @@ function set(next: AuthState) {
   listeners.forEach((listener) => listener())
 }
 
-/** Builds the `Authorization` header value; UTF-8 safe so non-ASCII passwords work. */
-export function basicHeader(username: string, password: string) {
-  const bytes = new TextEncoder().encode(`${username}:${password}`)
-  return `Basic ${btoa(String.fromCharCode(...bytes))}`
-}
-
 export function getAuthHeader() {
-  return state.token ? `Basic ${state.token}` : null
+  if (state.token && isExpired(state.expiresAt)) {
+    signOut('Your session has expired. Please sign in again.')
+    return null
+  }
+  return state.token ? `Bearer ${state.token}` : null
 }
 
-export function signIn(username: string, header: string) {
-  set({ token: header.replace(/^Basic /, ''), username, notice: null })
+export function signIn(token: string, username: string, expiresAt: string | null) {
+  set({ token, username, expiresAt, notice: null })
 }
 
 export function signOut(notice: string | null = null) {
   if (!state.token && state.notice === notice) return
-  set({ token: null, username: null, notice })
+  set({ token: null, username: null, expiresAt: null, notice })
 }
 
 const subscribe = (listener: () => void) => {
