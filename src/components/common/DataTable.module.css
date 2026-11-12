@@ -1,0 +1,36 @@
+.scroller {
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.table th,
+.table td {
+  white-space: nowrap;
+}
+
+.table thead {
+  background-color: var(--app-surface);
+  box-shadow: inset 0 -1px 0 var(--app-border);
+}
+
+.mobileRow {
+  border-bottom: 1px solid var(--app-border);
+}
+
+.stickyToolbar {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background-color: var(--mantine-color-body);
+  border-radius: var(--mantine-radius-lg) var(--mantine-radius-lg) 0 0;
+  box-shadow: 0 6px 12px -10px rgb(0 0 0 / 0.25);
+}
+
+.clickable {
+  cursor: pointer;
+}
+
+.clickable:focus-visible {
+  outline: 2px solid var(--mantine-primary-color-filled);
+  outline-offset: -2px;
+}
