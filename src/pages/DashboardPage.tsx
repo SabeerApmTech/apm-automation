@@ -76,7 +76,7 @@ export default function DashboardPage() {
   // The API can sort by status time, so the latest reports are a single small request.
   const inactive = useCursorList('inactive', (_afterId, signal) =>
     getVehicleStatuses(
-      { take: RECENT_COUNT, isSurakshaMitrActive: false, isApmConnectActive: false, sort: 'statusDateTime_desc' },
+      { take: RECENT_COUNT, isSurakshaMitrActive: false, isApmConnectActive: false, sort: 'surakshaMitrDateTime_desc' },
       signal,
     ),
   )
@@ -192,7 +192,7 @@ export default function DashboardPage() {
                     <Table.Th>IMEI</Table.Th>
                     <Table.Th>Suraksha Mitr</Table.Th>
                     <Table.Th>APM Connect</Table.Th>
-                    <Table.Th>Status time</Table.Th>
+                    <Table.Th>Suraksha Mitr time</Table.Th>
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
@@ -209,7 +209,7 @@ export default function DashboardPage() {
                       <Table.Td>
                         <ActivityBadge active={s.isApmConnectActive} />
                       </Table.Td>
-                      <Table.Td className="whitespace-nowrap">{formatDateTime(s.statusDateTime)}</Table.Td>
+                      <Table.Td className="whitespace-nowrap">{formatDateTime(s.surakshaMitrDateTime)}</Table.Td>
                     </Table.Tr>
                   ))}
                 </Table.Tbody>

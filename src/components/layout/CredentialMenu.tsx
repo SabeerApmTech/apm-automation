@@ -61,7 +61,13 @@ function CredentialCard({ credential, onSaved }: { credential: SurakshaMitrCrede
       setEditing(false)
       onSaved()
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Something went wrong. Please try again.')
+      if (e instanceof ApiError && /no change is needed/i.test(e.message)) {
+        // The API reports an unchanged, already-working login as a rejection; it isn't a failure.
+        notify.info(e.message, 'No change needed')
+        setEditing(false)
+      } else {
+        setError(e instanceof ApiError ? e.message : 'Something went wrong. Please try again.')
+      }
     } finally {
       setSaving(false)
     }

@@ -29,7 +29,8 @@ export interface VehicleStatusView {
   id: number
   vehicleListId: number
   imei: string | null
-  statusDateTime: string | null
+  surakshaMitrDateTime: string | null
+  apmDeviceTime: string | null
   mainPower: string | null
   ignition: string | null
   speed: number | null
@@ -55,7 +56,7 @@ export interface StatusCursorPage extends CursorPage<VehicleStatusView> {
   apmConnectInactiveCount: number
   /** Vehicles inactive in both Suraksha Mitr and APM Connect. */
   inactiveInBothCount: number
-  /** Next `skip` when paging a statusDateTime sort; null for the id sort. */
+  /** Next `skip` when paging a surakshaMitrDateTime sort; null for the id sort. */
   nextSkip: number | null
 }
 
@@ -65,13 +66,13 @@ export interface ListQuery {
   search?: string
 }
 
-export type StatusSort = 'id_asc' | 'statusDateTime_asc' | 'statusDateTime_desc'
+export type StatusSort = 'id_asc' | 'surakshaMitrDateTime_asc' | 'surakshaMitrDateTime_desc'
 
 export interface StatusListQuery extends ListQuery {
   /** Filter on the Suraksha Mitr / APM Connect active flags (combined with AND). */
   isSurakshaMitrActive?: boolean
   isApmConnectActive?: boolean
-  /** Default is id_asc (page with afterId). The statusDateTime sorts are paged with skip instead. */
+  /** Default is id_asc (page with afterId). The surakshaMitrDateTime sorts are paged with skip instead. */
   sort?: StatusSort
   skip?: number
 }
