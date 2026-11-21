@@ -1,16 +1,17 @@
-const dateTime = new Intl.DateTimeFormat(undefined, {
-  dateStyle: 'medium',
-  timeStyle: 'short',
-})
-
 export const dash = '—'
 
+/**
+ * Shows the time as the API recorded it (no timezone shift) in 12-hour form,
+ * e.g. "2026-11-19T17:04:46" becomes "2026-11-19 05:04:46 PM".
+ */
 export function formatDateTime(value: string | null | undefined) {
   if (!value) return dash
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  // The API sends 0001-01-01 for "no time recorded".
-  return date.getFullYear() < 1970 ? dash : dateTime.format(date)
+  const match = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?/.exec(value)
+  if (!match) return value
+  const [, day, hours, minutes, seconds = '00'] = match
+  const hour = Number(hours)
+  const clock = String(hour % 12 || 12).padStart(2, '0')
+  return `${day} ${clock}:${minutes}:${seconds} ${hour < 12 ? 'AM' : 'PM'}`
 }
 
 export function formatNumber(value: number | null | undefined) {

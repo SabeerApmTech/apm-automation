@@ -4,9 +4,8 @@ import { useMemo, useState } from 'react'
 import { ActivityBadge, StateBadge } from '../common/Badges'
 import { DataTable, type DataTableColumn } from '../common/DataTable'
 import { DetailGrid } from '../common/DetailGrid'
-import { useFleet, type FleetRow } from '../../hooks/useFleet'
+import { fetchEveryRow, useFleet, type FleetFilters, type FleetRow } from '../../hooks/useFleet'
 import { useUrlFilters } from '../../hooks/useUrlFilters'
-import { activityOf as statusActivity, type Activity } from '../../lib/activity'
 import { exportTable } from '../../lib/export'
 import { formatDateTime, formatNumber, formatSpeed, text } from '../../lib/format'
 import { queueImeis } from '../../services/vehicles'
@@ -48,11 +47,6 @@ function sortRows(rows: FleetRow[], field: string, direction: string) {
   })
 }
 
-/** Active if either product is active, inactive if both are; no record or missing flags is unknown. */
-function activityOf(row: FleetRow): Activity {
-  return statusActivity(row.status)
-}
-
 const EXPORT_HEADERS = [
   'Vehicle no',
   'IMEI',
@@ -67,7 +61,6 @@ const EXPORT_HEADERS = [
   'Manufacturer',
   'Franchisee',
   'Portal status',
-  'Status',
   'Suraksha Mitr',
   'APM Connect',
   'Suraksha Mitr date/time',
@@ -78,8 +71,6 @@ const EXPORT_HEADERS = [
   'Speed (km/h)',
   'Alerts',
 ]
-
-const ACTIVITY_LABEL: Record<Activity, string> = { active: 'Active', inactive: 'Inactive', unknown: 'Not fetched' }
 
 const flagLabel = (flag: boolean | null | undefined) => (flag === true ? 'Active' : flag === false ? 'Inactive' : '')
 
@@ -99,7 +90,6 @@ function toExportRow({ vehicle: v, status: s }: FleetRow): string[] {
     cell(v.manufacturer),
     cell(v.franchisee),
     cell(v.status),
-    ACTIVITY_LABEL[activityOf({ vehicle: v, status: s })],
     flagLabel(s?.isSurakshaMitrActive),
     flagLabel(s?.isApmConnectActive),
     cell(s?.surakshaMitrDateTime),
@@ -131,13 +121,14 @@ export function FleetTable() {
   const order = filters.extras.order === 'asc' ? 'asc' : 'desc'
 
   // Filtering, searching and ordering all happen on the API.
-  const fleet = useFleet({
+  const fleetFilters: FleetFilters = {
     search: filters.search,
     surakshaMitrActive: surakshaMitr ? surakshaMitr === 'active' : undefined,
     apmConnectActive: apmConnect ? apmConnect === 'active' : undefined,
     // Only the Suraksha Mitr time is ordered by the API; the other two order the loaded rows below.
     order: sortBy === 'sm' ? order : 'desc',
-  })
+  }
+  const fleet = useFleet(fleetFilters)
   const visible = useMemo(
     () => (sortBy === 'sm' ? fleet.rows : sortRows(fleet.rows, sortBy, order)),
     [fleet.rows, sortBy, order],
@@ -226,11 +217,11 @@ export function FleetTable() {
   const onExport = async () => {
     setExporting(true)
     try {
-      await exportTable('xlsx', 'vehicles', EXPORT_HEADERS, visible.map(toExportRow))
-      notify.success(
-        `${formatNumber(visible.length)} vehicle${visible.length === 1 ? '' : 's'} exported${fleet.hasMore ? ' (the loaded ones)' : ''}.`,
-        'Export ready',
-      )
+      // Every record matching the current filters, not only the ones loaded on screen.
+      const everyRow = await fetchEveryRow(fleetFilters)
+      const rows = sortBy === 'sm' ? everyRow : sortRows(everyRow, sortBy, order)
+      await exportTable('xlsx', 'vehicles', EXPORT_HEADERS, rows.map(toExportRow))
+      notify.success(`${formatNumber(rows.length)} vehicle${rows.length === 1 ? '' : 's'} exported.`, 'Export ready')
     } catch {
       notify.error('The file could not be created. Please try again.', 'Export failed')
     } finally {

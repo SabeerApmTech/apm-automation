@@ -35,15 +35,29 @@ function toRow({ status, portalStatus, ...vehicle }: VehicleListItem): FleetRow 
   return { vehicle: { ...vehicle, status: portalStatus }, status }
 }
 
+/** Every row matching the filters (not just the loaded ones), fetched in the largest pages the API allows. */
+export async function fetchEveryRow(filters: FleetFilters): Promise<FleetRow[]> {
+  const items: VehicleListItem[] = []
+  let skip = 0
+  for (;;) {
+    const page = await getVehicles(pageQuery(filters, skip, 1000))
+    items.push(...page.items)
+    // A page that adds nothing would repeat forever; treat it as the end.
+    if (!page.hasMore || page.items.length === 0) break
+    skip = page.nextSkip ?? skip + page.items.length
+  }
+  return items.map(toRow)
+}
+
 function toError(error: unknown) {
   return error instanceof ApiError
     ? error
     : new ApiError(error instanceof Error ? error.message : 'Unexpected error', -1)
 }
 
-function pageQuery(filters: FleetFilters, skip: number) {
+function pageQuery(filters: FleetFilters, skip: number, take = CHUNK_SIZE) {
   return {
-    take: CHUNK_SIZE,
+    take,
     skip,
     search: filters.search || undefined,
     isSurakshaMitrActive: filters.surakshaMitrActive,
