@@ -1,5 +1,5 @@
-import { Alert, Button, Loader, Modal, Stack, Text } from '@mantine/core'
-import { IconAlertTriangle } from '@tabler/icons-react'
+import { Alert, Button, Group, Modal, Stack, Text } from '@mantine/core'
+import { IconAlertTriangle, IconListCheck, IconSend } from '@tabler/icons-react'
 import { useMemo, useState } from 'react'
 import { ActivityBadge, StateBadge } from '../common/Badges'
 import { DataTable, type DataTableColumn } from '../common/DataTable'
@@ -7,9 +7,9 @@ import { DetailGrid } from '../common/DetailGrid'
 import { useFleet, type FleetRow } from '../../hooks/useFleet'
 import { useUrlFilters } from '../../hooks/useUrlFilters'
 import { activityOf as statusActivity, type Activity } from '../../lib/activity'
-import { PAGE_SIZE } from '../../lib/config'
 import { exportTable } from '../../lib/export'
 import { formatDateTime, formatNumber, formatSpeed, text } from '../../lib/format'
+import { queueImeis } from '../../services/vehicles'
 import { notify } from '../../utils/notify'
 
 const FLAG_OPTIONS = [
@@ -18,20 +18,39 @@ const FLAG_OPTIONS = [
   { value: 'inactive', label: 'Inactive' },
 ]
 
-/** Whether a vehicle's status flag satisfies a filter; vehicles with no status never match one. */
-function flagMatches(flag: boolean | null | undefined, filter: string) {
-  if (!filter) return true
-  return filter === 'active' ? flag === true : flag === false
+const SORT_BY_OPTIONS = [
+  { value: 'sm', label: 'Suraksha Mitr' },
+  { value: 'apm', label: 'APM device' },
+  { value: 'fetched', label: 'Fetched at' },
+]
+
+const ORDER_OPTIONS = [
+  { value: 'desc', label: 'Newest' },
+  { value: 'asc', label: 'Oldest' },
+]
+
+/** Milliseconds for a recorded time, or null when missing (including the API's 0001-01-01 placeholder). */
+function timeOf(value: string | null | undefined) {
+  if (!value) return null
+  const time = Date.parse(value)
+  return Number.isNaN(time) || new Date(time).getFullYear() < 1970 ? null : time
+}
+
+/** Orders loaded rows by APM device time or fetched time (the API can't); rows without a time go last. */
+function sortRows(rows: FleetRow[], field: string, direction: string) {
+  const read = (row: FleetRow) => timeOf(field === 'apm' ? row.status?.apmDeviceTime : row.status?.updatedAt)
+  const sign = direction === 'asc' ? 1 : -1
+  return [...rows].sort((a, b) => {
+    const x = read(a)
+    const y = read(b)
+    if (x === null || y === null) return x === y ? 0 : x === null ? 1 : -1
+    return (x - y) * sign
+  })
 }
 
 /** Active if either product is active, inactive if both are; no record or missing flags is unknown. */
 function activityOf(row: FleetRow): Activity {
   return statusActivity(row.status)
-}
-
-function matches(row: FleetRow, query: string) {
-  const { vehicle: v } = row
-  return [v.vehicleNo, v.imei, v.owner, v.rto, v.chassisNo].some((field) => field?.toLowerCase().includes(query))
 }
 
 const EXPORT_HEADERS = [
@@ -53,6 +72,7 @@ const EXPORT_HEADERS = [
   'APM Connect',
   'Suraksha Mitr date/time',
   'APM device time',
+  'Fetched at',
   'Main power',
   'Ignition',
   'Speed (km/h)',
@@ -84,6 +104,7 @@ function toExportRow({ vehicle: v, status: s }: FleetRow): string[] {
     flagLabel(s?.isApmConnectActive),
     cell(s?.surakshaMitrDateTime),
     cell(s?.apmDeviceTime),
+    cell(s?.updatedAt),
     cell(s?.mainPower),
     cell(s?.ignition),
     cell(s?.speed),
@@ -92,11 +113,12 @@ function toExportRow({ vehicle: v, status: s }: FleetRow): string[] {
 }
 
 export function FleetTable() {
-  const filters = useUrlFilters(['surakshaMitr', 'apmConnect'])
-  const fleet = useFleet()
+  const filters = useUrlFilters(['surakshaMitr', 'apmConnect', 'sortBy', 'order'])
   const [selected, setSelected] = useState<FleetRow | null>(null)
   const [exporting, setExporting] = useState(false)
-  const [shown, setShown] = useState({ key: '', count: PAGE_SIZE })
+  const [selecting, setSelecting] = useState(false)
+  const [picked, setPicked] = useState<ReadonlySet<string | number>>(new Set())
+  const [queuing, setQueuing] = useState(false)
 
   const flagParam = (key: 'surakshaMitr' | 'apmConnect') => {
     const raw = filters.extras[key] ?? ''
@@ -104,31 +126,60 @@ export function FleetTable() {
   }
   const surakshaMitr = flagParam('surakshaMitr')
   const apmConnect = flagParam('apmConnect')
-  const query = filters.search.toLowerCase()
+  // Newest Suraksha Mitr time first unless the URL says otherwise.
+  const sortBy = filters.extras.sortBy === 'apm' || filters.extras.sortBy === 'fetched' ? filters.extras.sortBy : 'sm'
+  const order = filters.extras.order === 'asc' ? 'asc' : 'desc'
 
-  const filtered = useMemo(
-    () =>
-      fleet.rows.filter(
-        (row) =>
-          flagMatches(row.status?.isSurakshaMitrActive, surakshaMitr) &&
-          flagMatches(row.status?.isApmConnectActive, apmConnect) &&
-          (!query || matches(row, query)),
-      ),
-    [fleet.rows, surakshaMitr, apmConnect, query],
+  // Filtering, searching and ordering all happen on the API.
+  const fleet = useFleet({
+    search: filters.search,
+    surakshaMitrActive: surakshaMitr ? surakshaMitr === 'active' : undefined,
+    apmConnectActive: apmConnect ? apmConnect === 'active' : undefined,
+    // Only the Suraksha Mitr time is ordered by the API; the other two order the loaded rows below.
+    order: sortBy === 'sm' ? order : 'desc',
+  })
+  const visible = useMemo(
+    () => (sortBy === 'sm' ? fleet.rows : sortRows(fleet.rows, sortBy, order)),
+    [fleet.rows, sortBy, order],
   )
 
-  // Show a page at a time; the window resets whenever the filters change.
-  const windowKey = `${query}|${surakshaMitr}|${apmConnect}`
-  const count = shown.key === windowKey ? shown.count : PAGE_SIZE
-  const visible = filtered.slice(0, count)
+  // Only rows currently loaded can be sent, so ignore picks that a filter change has hidden.
+  const chosen = useMemo(() => visible.filter(({ vehicle }) => picked.has(vehicle.id)), [visible, picked])
 
-  const notFetched = fleet.statusesLoading ? (
-    <Loader size={14} />
-  ) : (
-    <Text size="sm" c="dimmed">
-      Not fetched
-    </Text>
-  )
+  const startSelecting = () => {
+    // Re-fetching is for vehicles that went quiet, so start from the Suraksha Mitr inactive list.
+    filters.setParam('surakshaMitr', 'inactive')
+    setPicked(new Set())
+    setSelecting(true)
+  }
+  const stopSelecting = () => {
+    setSelecting(false)
+    setPicked(new Set())
+  }
+
+  const toggleRow = ({ vehicle }: FleetRow) =>
+    setPicked((current) => {
+      const next = new Set(current)
+      if (next.has(vehicle.id)) next.delete(vehicle.id)
+      else next.add(vehicle.id)
+      return next
+    })
+
+  const onQueue = async () => {
+    const imeis = [...new Set(chosen.map(({ vehicle }) => (vehicle.imei ?? '').trim()).filter(Boolean))]
+    if (imeis.length === 0) return
+    setQueuing(true)
+    try {
+      const result = await queueImeis(imeis)
+      const already = result?.alreadyInQueue ? ` ${formatNumber(result.alreadyInQueue)} were already queued.` : ''
+      notify.success(`${formatNumber(imeis.length)} IMEI${imeis.length === 1 ? '' : 's'} sent for a fresh fetch.${already}`, 'Queued')
+      stopSelecting()
+    } catch (error) {
+      notify.error(error instanceof Error ? error.message : 'The IMEIs could not be sent. Please try again.', 'Queue failed')
+    } finally {
+      setQueuing(false)
+    }
+  }
 
   const columns: DataTableColumn<FleetRow>[] = [
     {
@@ -144,15 +195,16 @@ export function FleetTable() {
     {
       key: 'surakshaMitr',
       header: 'Suraksha Mitr',
-      render: (row) => (row.status ? <ActivityBadge active={row.status.isSurakshaMitrActive} /> : notFetched),
+      render: ({ status }) => <ActivityBadge active={status?.isSurakshaMitrActive ?? null} />,
     },
     { key: 'surakshaMitrTime', header: 'Suraksha Mitr time', render: ({ status }) => formatDateTime(status?.surakshaMitrDateTime) },
     {
       key: 'apmConnect',
       header: 'APM Connect',
-      render: (row) => (row.status ? <ActivityBadge active={row.status.isApmConnectActive} /> : notFetched),
+      render: ({ status }) => <ActivityBadge active={status?.isApmConnectActive ?? null} />,
     },
     { key: 'apmDeviceTime', header: 'APM device time', render: ({ status }) => formatDateTime(status?.apmDeviceTime) },
+    { key: 'fetchedAt', header: 'Fetched at', render: ({ status }) => formatDateTime(status?.updatedAt) },
     { key: 'owner', header: 'Owner', render: ({ vehicle }) => text(vehicle.owner) },
     { key: 'ownerMobile', header: 'Owner mobile', render: ({ vehicle }) => text(vehicle.ownerMobile) },
     { key: 'rto', header: 'RTO', render: ({ vehicle }) => text(vehicle.rto), hideOnMobile: true },
@@ -174,8 +226,11 @@ export function FleetTable() {
   const onExport = async () => {
     setExporting(true)
     try {
-      await exportTable('xlsx', 'vehicles', EXPORT_HEADERS, filtered.map(toExportRow))
-      notify.success(`${formatNumber(filtered.length)} vehicle${filtered.length === 1 ? '' : 's'} exported.`, 'Export ready')
+      await exportTable('xlsx', 'vehicles', EXPORT_HEADERS, visible.map(toExportRow))
+      notify.success(
+        `${formatNumber(visible.length)} vehicle${visible.length === 1 ? '' : 's'} exported${fleet.hasMore ? ' (the loaded ones)' : ''}.`,
+        'Export ready',
+      )
     } catch {
       notify.error('The file could not be created. Please try again.', 'Export failed')
     } finally {
@@ -183,23 +238,36 @@ export function FleetTable() {
     }
   }
 
-  const exportBlocked = fleet.vehiclesError
-    ? 'Export is unavailable because vehicles failed to load'
-    : !fleet.isComplete
-      ? 'Export is available once everything has finished loading'
-      : filtered.length === 0
-        ? 'Nothing to export'
-        : undefined
+  const exportBlocked = fleet.error && visible.length === 0 ? 'Export is unavailable because vehicles failed to load' : visible.length === 0 ? 'Nothing to export' : undefined
 
-  const warnings = [
-    fleet.vehiclesError && fleet.rows.length > 0 && `Only some vehicles could be loaded (${fleet.vehiclesError.message}).`,
-    fleet.statusError && `Status details could not be loaded (${fleet.statusError.message}). Status may be missing.`,
-  ].filter(Boolean)
+  const selectBar = selecting ? (
+    <Group justify="space-between" gap="sm" px={{ base: 'md', sm: 'lg' }} py="xs" style={{ borderBottom: '1px solid var(--app-border)' }}>
+      <Text size="sm" fw={600}>
+        {formatNumber(chosen.length)} selected
+        <Text span size="sm" c="dimmed" fw={400}>
+          {' '}· Suraksha Mitr inactive vehicles
+        </Text>
+      </Text>
+      <Group gap="xs">
+        <Button variant="default" size="xs" onClick={stopSelecting} disabled={queuing}>
+          Cancel
+        </Button>
+        <Button size="xs" leftSection={<IconSend size={14} />} onClick={onQueue} loading={queuing} disabled={chosen.length === 0}>
+          Send {chosen.length > 0 ? formatNumber(chosen.length) : ''} IMEI{chosen.length === 1 ? '' : 's'}
+        </Button>
+      </Group>
+    </Group>
+  ) : (
+    <Group justify="flex-end" px={{ base: 'md', sm: 'lg' }} py={6} style={{ borderBottom: '1px solid var(--app-border)' }}>
+      <Button variant="subtle" size="compact-sm" leftSection={<IconListCheck size={16} />} onClick={startSelecting}>
+        Select vehicles
+      </Button>
+    </Group>
+  )
 
-  const total = fleet.rows.length
-  const summary = `Showing ${formatNumber(visible.length)} of ${formatNumber(filtered.length)} vehicle${filtered.length === 1 ? '' : 's'}${
-    filtered.length !== total ? ` (${formatNumber(total)} total)` : ''
-  }${fleet.isComplete ? '' : ' · still loading…'}`
+  const warnings: string[] = []
+
+  const summary = `Showing ${formatNumber(visible.length)} of ${formatNumber(fleet.total ?? visible.length)} vehicle${fleet.total === 1 ? '' : 's'}`
 
   const isFiltered = filters.isFiltered || filters.input !== ''
 
@@ -207,52 +275,57 @@ export function FleetTable() {
     <>
       <DataTable
         title="Vehicles"
+        count={fleet.total}
         noun="vehicle"
         data={visible}
         columns={columns}
         rowKey={({ vehicle }) => vehicle.id}
         loading={fleet.isLoading}
-        error={fleet.rows.length === 0 ? fleet.vehiclesError : null}
+        error={fleet.rows.length === 0 ? fleet.error : null}
         errorTitle="Couldn't load vehicles"
         search={{ value: filters.input, onChange: filters.setInput, placeholder: 'Search vehicle no, IMEI, owner…' }}
         filters={{
           fields: [
-            { key: 'surakshaMitr', label: 'Suraksha Mitr', type: 'segmented', data: FLAG_OPTIONS },
+            { key: 'surakshaMitr', label: 'Suraksha Mitr', type: 'segmented', data: FLAG_OPTIONS, disabled: selecting },
             { key: 'apmConnect', label: 'APM Connect', type: 'segmented', data: FLAG_OPTIONS },
+            { key: 'sortBy', label: 'Sort by time', type: 'segmented', data: SORT_BY_OPTIONS, disabled: selecting },
+            { key: 'order', label: 'Order', type: 'segmented', data: ORDER_OPTIONS },
           ],
-          values: { surakshaMitr, apmConnect },
-          onChange: (key, value) => filters.setParam(key, value || null),
+          values: { surakshaMitr, apmConnect, sortBy, order },
+          onChange: (key, value) => filters.setParam(key, (key === 'order' && value === 'desc') || (key === 'sortBy' && value === 'sm') ? null : value || null),
           onReset: filters.reset,
-          activeCount: (surakshaMitr ? 1 : 0) + (apmConnect ? 1 : 0),
+          activeCount: (surakshaMitr ? 1 : 0) + (apmConnect ? 1 : 0) + (sortBy !== 'sm' || order !== 'desc' ? 1 : 0),
         }}
         exporter={{ onExport, busy: exporting, disabledReason: exportBlocked }}
         onRefresh={fleet.reload}
-        hasMore={visible.length < filtered.length}
-        loadingMore={false}
-        loadMoreError={null}
-        onLoadMore={() => setShown({ key: windowKey, count: count + PAGE_SIZE })}
+        hasMore={fleet.hasMore}
+        loadingMore={fleet.loadingMore}
+        loadMoreError={visible.length > 0 ? fleet.error : null}
+        onLoadMore={fleet.loadMore}
         summary={summary}
         banner={
-          warnings.length > 0 ? (
-            <Alert color="yellow" variant="light" radius={0} icon={<IconAlertTriangle size={18} />}>
-              <Stack gap={2}>
-                {warnings.map((warning) => (
-                  <Text key={String(warning)} size="sm">
-                    {warning}
-                  </Text>
-                ))}
-              </Stack>
-            </Alert>
-          ) : undefined
+          <>
+            {selectBar}
+            {warnings.length > 0 && (
+              <Alert color="yellow" variant="light" radius={0} icon={<IconAlertTriangle size={18} />}>
+                <Stack gap={2}>
+                  {warnings.map((warning) => (
+                    <Text key={String(warning)} size="sm">
+                      {warning}
+                    </Text>
+                  ))}
+                </Stack>
+              </Alert>
+            )}
+          </>
         }
-        onRowClick={setSelected}
+        selection={selecting ? { selected: picked, onChange: setPicked } : undefined}
+        onRowClick={selecting ? toggleRow : setSelected}
         empty={
           isFiltered
             ? {
                 title: 'No vehicles match your filters',
-                description: fleet.isComplete
-                  ? 'Try a different search or reset the filters.'
-                  : 'Still loading — more vehicles may appear in a moment.',
+                description: 'Try a different search or reset the filters.',
                 action: (
                   <Button variant="light" size="xs" onClick={filters.reset}>
                     Reset filters
@@ -261,7 +334,7 @@ export function FleetTable() {
               }
             : {
                 title: 'No vehicles yet',
-                description: 'Vehicles appear here once the Automation app has synced them.',
+                description: 'Vehicles appear here once the Automation app has fetched their status.',
               }
         }
       />

@@ -11,7 +11,7 @@ import { useCursorList } from '../hooks/useCursorList'
 import { useStatusSummary } from '../hooks/useStatusSummary'
 import { formatDateTime, formatNumber, text } from '../lib/format'
 import { exportTable } from '../lib/export'
-import { getVehicles, getVehicleStatuses } from '../services/vehicles'
+import { getVehicles } from '../services/vehicles'
 import { notify } from '../utils/notify'
 
 const RECENT_COUNT = 8
@@ -25,14 +25,12 @@ type ExportKind = 'active' | 'inactive' | 'unfetched'
 
 const EXPORT_LABEL: Record<ExportKind, string> = { active: 'active', inactive: 'inactive', unfetched: 'not-yet-fetched' }
 
-/** IMEIs of vehicles that have no status record yet (the status list is joined to vehicles by id). */
+/** IMEIs of vehicles the automation has not fetched a status for yet (no product flag recorded). */
 async function loadUnfetchedImeis() {
-  const [vehicles, statuses] = await Promise.all([
-    fetchEveryPage((afterId, signal) => getVehicles({ afterId, take: FETCH_SIZE }, signal)),
-    fetchEveryPage((afterId, signal) => getVehicleStatuses({ afterId, take: FETCH_SIZE }, signal)),
-  ])
-  const fetched = new Set(statuses.map((s) => s.vehicleListId))
-  return vehicles.filter((v) => !fetched.has(v.id)).map((v) => v.imei)
+  const vehicles = await fetchEveryPage((afterId, signal) => getVehicles({ afterId, take: FETCH_SIZE }, signal))
+  return vehicles
+    .filter((v) => !v.status || (v.status.isSurakshaMitrActive === null && v.status.isApmConnectActive === null))
+    .map((v) => v.imei)
 }
 
 /**
@@ -41,7 +39,7 @@ async function loadUnfetchedImeis() {
  */
 async function loadStatusImeis(kind: 'active' | 'inactive') {
   const pages = (filter: { isSurakshaMitrActive?: boolean; isApmConnectActive?: boolean }) =>
-    fetchEveryPage((afterId, signal) => getVehicleStatuses({ afterId, take: FETCH_SIZE, ...filter }, signal))
+    fetchEveryPage((afterId, signal) => getVehicles({ afterId, take: FETCH_SIZE, ...filter }, signal))
   const lists =
     kind === 'active'
       ? await Promise.all([pages({ isSurakshaMitrActive: true }), pages({ isApmConnectActive: true })])
@@ -75,7 +73,7 @@ export default function DashboardPage() {
   const totals = useStatusSummary()
   // The API can sort by status time, so the latest reports are a single small request.
   const inactive = useCursorList('inactive', (_afterId, signal) =>
-    getVehicleStatuses(
+    getVehicles(
       { take: RECENT_COUNT, isSurakshaMitrActive: false, isApmConnectActive: false, sort: 'surakshaMitrDateTime_desc' },
       signal,
     ),
@@ -204,12 +202,12 @@ export default function DashboardPage() {
                         </Text>
                       </Table.Td>
                       <Table.Td>
-                        <ActivityBadge active={s.isSurakshaMitrActive} />
+                        <ActivityBadge active={s.status?.isSurakshaMitrActive ?? null} />
                       </Table.Td>
                       <Table.Td>
-                        <ActivityBadge active={s.isApmConnectActive} />
+                        <ActivityBadge active={s.status?.isApmConnectActive ?? null} />
                       </Table.Td>
-                      <Table.Td className="whitespace-nowrap">{formatDateTime(s.surakshaMitrDateTime)}</Table.Td>
+                      <Table.Td className="whitespace-nowrap">{formatDateTime(s.status?.surakshaMitrDateTime)}</Table.Td>
                     </Table.Tr>
                   ))}
                 </Table.Tbody>

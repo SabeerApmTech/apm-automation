@@ -1,5 +1,14 @@
 /** Types mirror the Automation API (Automation.dll DTOs and models, JSON camelCase). */
 
+/** Outcome of queueing IMEIs for a fresh status fetch. */
+export interface QueueImeisResult {
+  received?: number
+  updated?: number
+  movedFromCompleted?: number
+  alreadyInQueue?: number
+  skipped?: number
+}
+
 export interface LoginResponse {
   token: string | null
   expiresAt?: string
@@ -25,10 +34,9 @@ export interface Vehicle {
   updatedAt: string | null
 }
 
+/** The latest status the automation fetched for a vehicle. */
 export interface VehicleStatusView {
   id: number
-  vehicleListId: number
-  imei: string | null
   surakshaMitrDateTime: string | null
   apmDeviceTime: string | null
   mainPower: string | null
@@ -40,6 +48,13 @@ export interface VehicleStatusView {
   updatedAt: string | null
 }
 
+/** One row of GET /api/Vehicles: the vehicle, with its latest status (null until one is fetched). */
+export interface VehicleListItem extends Omit<Vehicle, 'status'> {
+  /** The vehicle's portal status. */
+  portalStatus: string | null
+  status: VehicleStatusView | null
+}
+
 export interface CursorPage<T> {
   /** Records matching the search (not just this page). */
   totalCount: number
@@ -48,7 +63,7 @@ export interface CursorPage<T> {
   nextAfterId: number | null
 }
 
-export interface StatusCursorPage extends CursorPage<VehicleStatusView> {
+export interface StatusCursorPage extends CursorPage<VehicleListItem> {
   /** Fleet-wide per-product totals returned with every status page. */
   surakshaMitrActiveCount: number
   apmConnectActiveCount: number

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ApiError, isAbortError } from '../services/http'
-import { getVehicles, getVehicleStatuses } from '../services/vehicles'
+import { getVehicles } from '../services/vehicles'
 
 export interface StatusSummary {
   vehicles: number
@@ -20,7 +20,7 @@ interface State {
   error: ApiError | null
 }
 
-/** Fleet-wide totals straight from the API: one tiny request each for vehicles and statuses. */
+/** Fleet-wide totals straight from the API: one tiny request. */
 export function useStatusSummary() {
   const [reloadToken, setReloadToken] = useState(0)
   const [state, setState] = useState<State | null>(null)
@@ -29,19 +29,19 @@ export function useStatusSummary() {
     const controller = new AbortController()
     const { signal } = controller
 
-    Promise.all([getVehicles({ take: 1 }, signal), getVehicleStatuses({ take: 1 }, signal)])
-      .then(([vehicles, statuses]) =>
+    getVehicles({ take: 1 }, signal)
+      .then((page) =>
         setState({
           token: reloadToken,
           summary: {
-            vehicles: vehicles.totalCount,
-            // Every status record is active on at least one product unless it is inactive on both.
-            active: Math.max(statuses.totalCount - statuses.inactiveInBothCount, 0),
-            inactive: statuses.inactiveInBothCount,
-            surakshaMitrActive: statuses.surakshaMitrActiveCount,
-            surakshaMitrInactive: statuses.surakshaMitrInactiveCount,
-            apmConnectActive: statuses.apmConnectActiveCount,
-            apmConnectInactive: statuses.apmConnectInactiveCount,
+            vehicles: page.totalCount,
+            // Every vehicle is active on at least one product unless it is inactive on both.
+            active: Math.max(page.totalCount - page.inactiveInBothCount, 0),
+            inactive: page.inactiveInBothCount,
+            surakshaMitrActive: page.surakshaMitrActiveCount,
+            surakshaMitrInactive: page.surakshaMitrInactiveCount,
+            apmConnectActive: page.apmConnectActiveCount,
+            apmConnectInactive: page.apmConnectInactiveCount,
           },
           error: null,
         }),

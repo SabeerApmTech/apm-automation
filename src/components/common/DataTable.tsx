@@ -1,4 +1,4 @@
-import { Box, Button, Card, Center, Group, SimpleGrid, Skeleton, Stack, Table, Text, ThemeIcon } from '@mantine/core'
+import { Box, Button, Card, Center, Checkbox, Group, SimpleGrid, Skeleton, Stack, Table, Text, ThemeIcon } from '@mantine/core'
 import { IconDatabaseOff } from '@tabler/icons-react'
 import type { KeyboardEvent, ReactNode } from 'react'
 import { useIsMobile } from '../../hooks/useBreakpoints'
@@ -15,6 +15,11 @@ export interface DataTableColumn<T> {
   hideOnMobile?: boolean
 }
 
+export interface DataTableSelection {
+  selected: ReadonlySet<string | number>
+  onChange: (next: Set<string | number>) => void
+}
+
 interface DataTableProps<T> extends Omit<DataTableToolbarProps, 'compact'> {
   data: T[]
   columns: DataTableColumn<T>[]
@@ -24,6 +29,8 @@ interface DataTableProps<T> extends Omit<DataTableToolbarProps, 'compact'> {
   errorTitle: string
   /** Makes whole rows clickable (and keyboard-activatable). */
   onRowClick?: (row: T) => void
+  /** Adds a checkbox per row (and a select-all for the rows shown). */
+  selection?: DataTableSelection
   empty: { title: string; description: string; action?: ReactNode }
   noun: string
   hasMore: boolean
@@ -47,6 +54,7 @@ export function DataTable<T>({
   error,
   errorTitle,
   onRowClick,
+  selection,
   empty,
   noun,
   hasMore,
@@ -75,6 +83,35 @@ export function DataTable<T>({
           },
         }
       : {}
+
+  const toggle = (row: T) => {
+    if (!selection) return
+    const next = new Set(selection.selected)
+    const key = rowKey(row)
+    if (next.has(key)) next.delete(key)
+    else next.add(key)
+    selection.onChange(next)
+  }
+  const allSelected = !!selection && hasRows && data.every((row) => selection.selected.has(rowKey(row)))
+  const someSelected = !!selection && data.some((row) => selection.selected.has(rowKey(row)))
+  const toggleAll = () => {
+    if (!selection) return
+    const next = new Set(selection.selected)
+    for (const row of data) {
+      if (allSelected) next.delete(rowKey(row))
+      else next.add(rowKey(row))
+    }
+    selection.onChange(next)
+  }
+  const checkbox = (row: T) => (
+    <Checkbox
+      size="xs"
+      aria-label="Select row"
+      checked={selection?.selected.has(rowKey(row)) ?? false}
+      onChange={() => toggle(row)}
+      onClick={(event) => event.stopPropagation()}
+    />
+  )
 
   const renderBody = () => {
     if (error) {
@@ -117,9 +154,12 @@ export function DataTable<T>({
       const details = rest.filter((c) => !c.hideOnMobile)
       return data.map((row) => (
         <Box key={rowKey(row)} p="md" className={classes.mobileRow} {...rowProps(row)}>
-          <Box miw={0} className="wrap-break-word">
-            {primary.render(row)}
-          </Box>
+          <Group gap="sm" wrap="nowrap" align="center">
+            {selection && checkbox(row)}
+            <Box miw={0} className="wrap-break-word">
+              {primary.render(row)}
+            </Box>
+          </Group>
           {details.length > 0 && (
             <SimpleGrid cols={2} mt="sm" spacing="md" verticalSpacing="sm">
               {details.map((column) => (
@@ -141,6 +181,11 @@ export function DataTable<T>({
         <Table className={classes.table} stickyHeader verticalSpacing="sm" horizontalSpacing="md" highlightOnHover miw="100%" w="max-content">
           <Table.Thead>
             <Table.Tr>
+              {selection && (
+                <Table.Th w={40}>
+                  <Checkbox size="xs" aria-label="Select all rows" checked={allSelected} indeterminate={someSelected && !allSelected} onChange={toggleAll} />
+                </Table.Th>
+              )}
               {columns.map((column) => (
                 <Table.Th key={column.key}>{column.header}</Table.Th>
               ))}
@@ -149,6 +194,7 @@ export function DataTable<T>({
           <Table.Tbody>
             {data.map((row) => (
               <Table.Tr key={rowKey(row)} {...rowProps(row)}>
+                {selection && <Table.Td>{checkbox(row)}</Table.Td>}
                 {columns.map((column) => (
                   <Table.Td key={column.key}>{column.render(row)}</Table.Td>
                 ))}

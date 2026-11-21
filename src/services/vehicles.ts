@@ -1,20 +1,20 @@
 import type {
-  CursorPage,
-  ListQuery,
+  QueueImeisResult,
   StatusCursorPage,
   StatusListQuery,
   SurakshaMitrCredential,
   UpdateSurakshaMitrCredentialRequest,
-  Vehicle,
 } from '../types/api'
 import { request } from './http'
 
-export function getVehicles(query: ListQuery, signal?: AbortSignal) {
-  return request<CursorPage<Vehicle>>('/api/Vehicles', { query: { ...query }, signal })
+/** Vehicles with their latest status, filtered/searched/sorted by the API. */
+export function getVehicles(query: StatusListQuery, signal?: AbortSignal) {
+  return request<StatusCursorPage>('/api/Vehicles', { query: { ...query }, signal })
 }
 
-export function getVehicleStatuses(query: StatusListQuery, signal?: AbortSignal) {
-  return request<StatusCursorPage>('/api/Vehicles/status', { query: { ...query }, signal })
+/** Puts the given IMEIs at the front of the queue for a fresh status fetch. */
+export function queueImeis(imeis: string[]) {
+  return request<QueueImeisResult | undefined>('/api/Vehicles/status/imeis', { method: 'POST', body: imeis })
 }
 
 export function getSurakshaMitrCredential(signal?: AbortSignal) {

@@ -1,6 +1,7 @@
 import {
   ActionIcon,
   type ActionIconProps,
+  Badge,
   Button,
   CloseButton,
   Indicator,
@@ -21,6 +22,8 @@ export interface FilterField {
   key: string
   label: string
   type: 'segmented' | 'select'
+  /** Locks the control, e.g. while a mode needs the current value. */
+  disabled?: boolean
   data: { value: string; label: string }[]
 }
 
@@ -34,6 +37,8 @@ export interface DataTableFilters {
 
 export interface DataTableToolbarProps {
   title: string
+  /** Total records, shown as a badge beside the title. */
+  count?: number | null
   search?: { value: string; onChange: (value: string) => void; placeholder: string }
   filters?: DataTableFilters
   onRefresh?: () => void
@@ -43,6 +48,15 @@ export interface DataTableToolbarProps {
   /** Primary button shown right after the search box. */
   primaryAction?: { label: string; icon: ReactNode; onClick: () => void; disabled?: boolean }
   compact?: boolean
+}
+
+function CountBadge({ count }: { count?: number | null }) {
+  if (count === null || count === undefined) return null
+  return (
+    <Badge variant="light" size="lg" ml="sm" tt="none" fw={600} component="span" className="align-middle">
+      {count.toLocaleString()}
+    </Badge>
+  )
 }
 
 function ToolbarIcon({ label, size = 40, ...props }: { label: string } & ActionIconProps & ComponentProps<'button'>) {
@@ -74,6 +88,7 @@ function FilterMenu({ fields, values, onChange, onReset, activeCount, size }: Da
                   size="xs"
                   data={field.data}
                   value={values[field.key]}
+                  disabled={field.disabled}
                   onChange={(value) => onChange(field.key, value)}
                 />
               </Input.Wrapper>
@@ -83,12 +98,13 @@ function FilterMenu({ fields, values, onChange, onReset, activeCount, size }: Da
                 label={field.label}
                 data={field.data}
                 value={values[field.key] || null}
+                disabled={field.disabled}
                 onChange={(next) => onChange(field.key, next ?? '')}
                 comboboxProps={{ withinPortal: false }}
               />
             ),
           )}
-          <Button variant="light" color="gray" size="xs" onClick={onReset} disabled={!activeCount}>
+          <Button variant="light" color="gray" size="xs" onClick={onReset} disabled={!activeCount || fields.some((field) => field.disabled)}>
             Reset filters
           </Button>
         </Stack>
@@ -111,7 +127,7 @@ function ExportButton({ exporter, size }: { exporter: NonNullable<DataTableToolb
   )
 }
 
-function CompactToolbar({ title, search, filters, onRefresh, refreshing, exporter, primaryAction }: DataTableToolbarProps) {
+function CompactToolbar({ title, count, search, filters, onRefresh, refreshing, exporter, primaryAction }: DataTableToolbarProps) {
   const [searchOpen, setSearchOpen] = useState(Boolean(search?.value))
 
   if (search && searchOpen) {
@@ -145,6 +161,7 @@ function CompactToolbar({ title, search, filters, onRefresh, refreshing, exporte
     <div className="flex items-center gap-2 px-4 py-3">
       <Text fw={700} fz="lg" truncate className="min-w-0 flex-1">
         {title}
+        <CountBadge count={count} />
       </Text>
       {search && (
         <Indicator size={9} disabled={!search.value} offset={6}>
@@ -178,11 +195,12 @@ function CompactToolbar({ title, search, filters, onRefresh, refreshing, exporte
   )
 }
 
-function FullToolbar({ title, search, filters, onRefresh, refreshing, exporter, primaryAction }: DataTableToolbarProps) {
+function FullToolbar({ title, count, search, filters, onRefresh, refreshing, exporter, primaryAction }: DataTableToolbarProps) {
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-3 px-6 py-4">
       <Text fw={700} fz="lg" className="order-1 flex-auto shrink-0 whitespace-nowrap lg:mr-4">
         {title}
+        <CountBadge count={count} />
       </Text>
 
       <div className="order-2 flex shrink-0 items-center gap-2 lg:order-6">

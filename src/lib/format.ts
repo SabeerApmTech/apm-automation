@@ -8,7 +8,9 @@ export const dash = '—'
 export function formatDateTime(value: string | null | undefined) {
   if (!value) return dash
   const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : dateTime.format(date)
+  if (Number.isNaN(date.getTime())) return value
+  // The API sends 0001-01-01 for "no time recorded".
+  return date.getFullYear() < 1970 ? dash : dateTime.format(date)
 }
 
 export function formatNumber(value: number | null | undefined) {
